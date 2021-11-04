@@ -11,8 +11,8 @@ def main():
 
     # initial setup
     directory = 'pic/55'
-    vint_side = 162
-    vint_top = 162
+    vint_side = 142
+    vint_top = 142
     ratio = 95/3.945  # 23.954372623574  # 36.9496855346
 
     save = True

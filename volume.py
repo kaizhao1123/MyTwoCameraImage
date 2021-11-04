@@ -4,6 +4,114 @@ import math
 
 
 ########################################################################
+# normalized img_top to the same size as img_side (decrease)
+########################################################################
+def normalizeImage(img_side, img_top, HSV_Lower_side, HSV_Lower_top, HSV_Upper):
+
+    contour_side = 0
+    contour_top = 0
+    weightAndHeight = []
+
+    ##
+    #  get the contour in img_side
+    ##
+
+    # convert the image to the hsv data format
+    hsv = cv.cvtColor(img_side, cv.COLOR_BGR2HSV)
+    hsv = cv.GaussianBlur(hsv, (3, 3), 10)
+    hsv = cv.dilate(hsv, (3, 3))
+    # Threshold the HSV image to get only brown colors
+    mask = cv.inRange(hsv, HSV_Lower_side, HSV_Upper)
+    ret, thresh = cv.threshold(mask, 127, 255, 0)
+    contours, hierarchy = cv.findContours(thresh, 1, 2)
+
+    for cont in contours:
+        area = cv.contourArea(cont)  # Calculate the area of the enclosing shape
+        if area < 2000:
+            continue
+        rect = cv.minAreaRect(cont)
+
+        # draw the min area rect
+        box = cv.boxPoints(rect)
+        box = np.int0(box)
+        cv.drawContours(img_side, [box], 0, (0, 0, 255), 2)  # red
+        contour_side = cont
+        weightAndHeight.append(rect[1])     # length and height
+
+    ##
+    #  get the contour in img_top
+    ##
+
+    # convert the image to the hsv data format
+    hsv = cv.cvtColor(img_top, cv.COLOR_BGR2HSV)
+    hsv = cv.GaussianBlur(hsv, (3, 3), 10)
+    hsv = cv.dilate(hsv, (3, 3))
+    # Threshold the HSV image to get only brown colors
+    mask = cv.inRange(hsv, HSV_Lower_top, HSV_Upper)
+    ret, thresh = cv.threshold(mask, 127, 255, 0)
+    contours, hierarchy = cv.findContours(thresh, 1, 2)
+
+    for cont in contours:
+        area = cv.contourArea(cont)  # Calculate the area of the enclosing shape
+        if area < 2000:
+            continue
+        rect = cv.minAreaRect(cont)
+
+        # draw the min area rect
+        # box = cv.boxPoints(rect)
+        # box = np.int0(box)
+        # cv.drawContours(img_top, [box], 0, (0, 0, 255), 2)  # red
+        contour_top = cont
+        # weightAndHeight.append(rect[1])     # length and width
+
+    ##
+    #   normalize img_top to img_side, and get parameters
+    ##
+
+    x, y, w, h = cv.boundingRect(contour_side)   # side
+    x_t, y_t, w_t, h_t = cv.boundingRect(contour_top)   # top
+    print(x, y, w, h)
+    print(x_t, y_t, w_t, h_t)
+    r = w_t / w
+    targetImg = img_top[y_t:y_t+h_t, x_t:x_t+w_t]
+    newW = w   # w_t / r
+    newH = math.floor(h_t / r)
+    dim = (newW, newH)
+    newTarget = cv.resize(targetImg, dim, interpolation=cv.INTER_AREA)
+    template = np.zeros([newH + 30, newW + 30, 3], dtype=np.uint8)
+    template[15: newH + 15, 15: newW + 15] = newTarget
+
+    # img_top[y_t-15: y_t+15 + newH, x_t-15: x_t+15 + newW] = template  # for the real top view
+
+    img_top[265 - 30 - newH: 265, x_t - 15: x_t + 15 + newW] = template        # for the assumed top view
+
+    # convert the image to the hsv data format
+    hsv = cv.cvtColor(img_top, cv.COLOR_BGR2HSV)
+    hsv = cv.GaussianBlur(hsv, (3, 3), 10)
+    hsv = cv.dilate(hsv, (3, 3))
+    # Threshold the HSV image to get only brown colors
+    mask = cv.inRange(hsv, HSV_Lower_top + 0, HSV_Upper)
+    ret, thresh = cv.threshold(mask, 127, 255, 0)
+    contours, hierarchy = cv.findContours(thresh, 1, 2)
+
+    for cont in contours:
+        area = cv.contourArea(cont)  # Calculate the area of the enclosing shape
+        if area < 2000:
+            continue
+        rect = cv.minAreaRect(cont)
+
+        # draw the min area rect
+        box = cv.boxPoints(rect)
+        box = np.int0(box)
+        cv.drawContours(img_top, [box], 0, (0, 0, 255), 2)  # red
+        contour_top = cont
+        weightAndHeight.append(rect[1])     # length and width
+
+    # print(weightAndHeight)
+    return contour_side, contour_top
+
+
+########################################################################
 # get left and right most point
 ########################################################################
 def getLeftRight(contour_dict):
@@ -303,6 +411,23 @@ def procView(HSVlower, HSVupper, img, ratio,  display, auto=False):
     return length, width, rectArray
 
 
+def newProcView(contour, img, ratio, display):
+
+    rect = cv.minAreaRect(contour)
+    length = math.floor(rect[1][0])
+    width = math.floor(rect[1][1])
+    length = length / ratio
+    width = width / ratio
+    if length < width:
+        width, length = length, width
+
+    if display:
+        drawLine(contour, img)
+        cv.drawContours(img, [contour], 0, (255, 0, 0), 1)
+    rectArray = slicingRect(contour)
+
+    return length, width, rectArray
+
 ########################################################################
 # display the result
 ########################################################################
@@ -342,11 +467,16 @@ def displayResult(length_side, height, width, volume, img_side, img_top, img_sid
 ########################################################################
 def procVolume(ratio, HSV_Upper, HSV_Lower_side, img_side, HSV_Lower_top, img_top,
                display, auto=False):
-    # Calculate the length and width using procView function for side view
-    length_side, height, rectArray_side = procView(HSV_Lower_side, HSV_Upper, img_side, ratio, display, auto)
 
-    # Calculate the length and width using procView function for top view
-    length_top, width, rectArray_top = procView(HSV_Lower_top, HSV_Upper, img_top, ratio, display, auto)
+    contour_side, contour_top = normalizeImage(img_side, img_top, HSV_Lower_side, HSV_Lower_top, HSV_Upper)
+    length_side, height, rectArray_side = newProcView(contour_side, img_side, ratio, display)
+    length_top, width, rectArray_top = newProcView(contour_top, img_top, ratio, display)
+
+    # # Calculate the length and width using procView function for side view
+    # length_side, height, rectArray_side = procView(HSV_Lower_side, HSV_Upper, img_side, ratio, display, auto)
+    #
+    # # Calculate the length and width using procView function for top view
+    # length_top, width, rectArray_top = procView(HSV_Lower_top, HSV_Upper, img_top, ratio, display, auto)
 
     return length_side, height, width, rectArray_side, rectArray_top
 
